@@ -1604,9 +1604,17 @@ Return in JSON format with:
               role: "user",
               parts: [
                 {
-                  text: `You are an expert assistant for online assessments. Carefully analyze the screenshot(s) to extract the complete question. Focus on capturing the EXACT question as written, including all details, options, and requirements.
+                  text: `You are an expert assistant for online assessments. Carefully analyze the screenshot(s) to extract all questions (there may be 1-3 questions). Focus on capturing the EXACT questions as written, including all details, options, and requirements. If multiple questions exist, include all in the question_text field with clear numbering.
 
-Return the information in JSON format with these fields: question_text, question_type (mcq/fill_blank/behavioral/other), options (if applicable), context. Just return the structured JSON without any other text.`
+Analyze this assessment question screenshot and extract all relevant information. The screenshot may contain 1-3 questions.
+
+Return in JSON format with:
+- question_text: The complete question text (if multiple questions, include all with clear numbering like "Q1: ... Q2: ... Q3: ...")
+- question_type: Type of question (mcq, fill_blank, behavioral, other) - use the most common type if mixed
+- options: Array of options if it's MCQ, null otherwise (for multiple MCQs, include all options)
+- context: Any additional context or instructions
+
+Just return the structured JSON without any other text.`
                 },
                 ...imageDataList.map(data => ({
                   inlineData: {
@@ -1673,9 +1681,17 @@ Return the information in JSON format with these fields: question_text, question
               content: [
                 {
                   type: "text" as const,
-                  text: `You are an expert assistant for online assessments. Carefully analyze the screenshot(s) to extract the complete question. Focus on capturing the EXACT question as written, including all details, options, and requirements.
+                  text: `You are an expert assistant for online assessments. Carefully analyze the screenshot(s) to extract all questions (there may be 1-3 questions). Focus on capturing the EXACT questions as written, including all details, options, and requirements. If multiple questions exist, include all in the question_text field with clear numbering.
 
-Return the information in JSON format with these fields: question_text, question_type (mcq/fill_blank/behavioral/other), options (if applicable), context. Just return the structured JSON without any other text.`
+Analyze this assessment question screenshot and extract all relevant information. The screenshot may contain 1-3 questions.
+
+Return in JSON format with:
+- question_text: The complete question text (if multiple questions, include all with clear numbering like "Q1: ... Q2: ... Q3: ...")
+- question_type: Type of question (mcq, fill_blank, behavioral, other) - use the most common type if mixed
+- options: Array of options if it's MCQ, null otherwise (for multiple MCQs, include all options)
+- context: Any additional context or instructions
+
+Just return the structured JSON without any other text.`
                 },
                 ...imageDataList.map(data => ({
                   type: "image" as const,
@@ -1749,7 +1765,7 @@ Return the information in JSON format with these fields: question_text, question
         );
 
         // Generate answer after successful extraction
-        const answerResult = await this.generateNonCodingAnswer(signal);
+        const answerResult = await this.generateNonCodingAnswer(signal, imageDataList);
         if (answerResult.success) {
           // Final progress update
           mainWindow.webContents.send("processing-status", {
@@ -1776,7 +1792,7 @@ Return the information in JSON format with these fields: question_text, question
     }
   }
 
-  private async generateNonCodingAnswer(signal: AbortSignal) {
+  private async generateNonCodingAnswer(signal: AbortSignal, imageDataList: string[]) {
     try {
       const questionInfo = this.deps.getProblemInfo();
       const config = configHelper.loadConfig();
@@ -1926,7 +1942,13 @@ If there are multiple questions, number them clearly (Q1, Q2, Q3). Be thorough b
               parts: [
                 {
                   text: `${systemPrompt}\n\n${promptText}`
-                }
+                },
+                ...imageDataList.map(data => ({
+                  inlineData: {
+                    mimeType: "image/png",
+                    data: data
+                  }
+                }))
               ]
             }
           ];
@@ -1988,7 +2010,15 @@ If there are multiple questions, number them clearly (Q1, Q2, Q3). Be thorough b
                 {
                   type: "text" as const,
                   text: `${systemPrompt}\n\n${promptText}`
-                }
+                },
+                ...imageDataList.map(data => ({
+                  type: "image" as const,
+                  source: {
+                    type: "base64" as const,
+                    media_type: "image/png" as const,
+                    data: data
+                  }
+                }))
               ]
             }
           ];
