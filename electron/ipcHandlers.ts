@@ -358,4 +358,14 @@ export function initializeIpcHandlers(deps: IIpcHandlerDeps): void {
       return { success: false, error: "Failed to delete last screenshot" }
     }
   })
+
+  // App mode handlers
+  ipcMain.handle("get-app-mode", () => {
+    return deps.getAppMode()
+  })
+
+  ipcMain.handle("set-app-mode", (_event, mode: "coding" | "non-coding") => {
+    deps.setAppMode(mode)
+    return { success: true }
+  })
 }

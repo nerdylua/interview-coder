@@ -166,12 +166,14 @@ export interface SolutionsProps {
   credits: number
   currentLanguage: string
   setLanguage: (language: string) => void
+  appMode: "coding" | "non-coding"
 }
 const Solutions: React.FC<SolutionsProps> = ({
   setView,
   credits,
   currentLanguage,
-  setLanguage
+  setLanguage,
+  appMode
 }) => {
   const queryClient = useQueryClient()
   const contentRef = useRef<HTMLDivElement>(null)
@@ -179,7 +181,7 @@ const Solutions: React.FC<SolutionsProps> = ({
   const [debugProcessing, setDebugProcessing] = useState(false)
   const [problemStatementData, setProblemStatementData] =
     useState<ProblemStatementData | null>(null)
-  const [solutionData, setSolutionData] = useState<string | null>(null)
+  const [solutionData, setSolutionData] = useState<string | any | null>(null)
   const [thoughtsData, setThoughtsData] = useState<string[] | null>(null)
   const [timeComplexityData, setTimeComplexityData] = useState<string | null>(
     null
@@ -302,20 +304,30 @@ const Solutions: React.FC<SolutionsProps> = ({
       //if there was an error processing the initial solution
       window.electronAPI.onSolutionError((error: string) => {
         showToast("Processing Failed", error, "error")
-        // Reset solutions in the cache (even though this shouldn't ever happen) and complexities to previous states
-        const solution = queryClient.getQueryData(["solution"]) as {
-          code: string
-          thoughts: string[]
-          time_complexity: string
-          space_complexity: string
-        } | null
-        if (!solution) {
+
+        if (appMode === "coding") {
+          // Reset solutions in the cache (even though this shouldn't ever happen) and complexities to previous states
+          const solution = queryClient.getQueryData(["solution"]) as {
+            code: string
+            thoughts: string[]
+            time_complexity: string
+            space_complexity: string
+          } | null
+          if (!solution) {
+            setView("queue")
+          }
+          setSolutionData(solution?.code || null)
+          setThoughtsData(solution?.thoughts || null)
+          setTimeComplexityData(solution?.time_complexity || null)
+          setSpaceComplexityData(solution?.space_complexity || null)
+        } else {
+          // Non-coding mode: just reset to queue view
           setView("queue")
+          setSolutionData(null)
+          setThoughtsData(null)
+          setTimeComplexityData(null)
+          setSpaceComplexityData(null)
         }
-        setSolutionData(solution?.code || null)
-        setThoughtsData(solution?.thoughts || null)
-        setTimeComplexityData(solution?.time_complexity || null)
-        setSpaceComplexityData(solution?.space_complexity || null)
         console.error("Processing error:", error)
       }),
       //when the initial solution is generated, we'll set the solution data to that
@@ -325,18 +337,35 @@ const Solutions: React.FC<SolutionsProps> = ({
           return
         }
         console.log({ data })
-        const solutionData = {
-          code: data.code,
-          thoughts: data.thoughts,
-          time_complexity: data.time_complexity,
-          space_complexity: data.space_complexity
-        }
 
-        queryClient.setQueryData(["solution"], solutionData)
-        setSolutionData(solutionData.code || null)
-        setThoughtsData(solutionData.thoughts || null)
-        setTimeComplexityData(solutionData.time_complexity || null)
-        setSpaceComplexityData(solutionData.space_complexity || null)
+        // Handle different data structures for coding vs non-coding modes
+        if (appMode === "coding") {
+          const solutionData = {
+            code: data.code,
+            thoughts: data.thoughts,
+            time_complexity: data.time_complexity,
+            space_complexity: data.space_complexity
+          }
+
+          queryClient.setQueryData(["solution"], solutionData)
+          setSolutionData(solutionData.code || null)
+          setThoughtsData(solutionData.thoughts || null)
+          setTimeComplexityData(solutionData.time_complexity || null)
+          setSpaceComplexityData(solutionData.space_complexity || null)
+        } else {
+          // Non-coding mode: store the answer data
+          const answerData = {
+            answer: data.answer,
+            question_type: data.question_type,
+            question_text: data.question_text
+          }
+
+          queryClient.setQueryData(["solution"], answerData)
+          setSolutionData(answerData as any) // Store the whole answer object for non-coding
+          setThoughtsData(null) // No thoughts in non-coding mode
+          setTimeComplexityData(null) // No complexity in non-coding mode
+          setSpaceComplexityData(null) // No complexity in non-coding mode
+        }
 
         // Fetch latest screenshots when solution is successful
         const fetchScreenshots = async () => {
@@ -393,13 +422,25 @@ const Solutions: React.FC<SolutionsProps> = ({
       resizeObserver.disconnect()
       cleanupFunctions.forEach((cleanup) => cleanup())
     }
-  }, [isTooltipVisible, tooltipHeight])
+  }, [isTooltipVisible, tooltipHeight, appMode])
 
   useEffect(() => {
     setProblemStatementData(
       queryClient.getQueryData(["problem_statement"]) || null
     )
-    setSolutionData(queryClient.getQueryData(["solution"]) || null)
+
+    const solution = queryClient.getQueryData(["solution"]) as any
+    if (appMode === "coding") {
+      setSolutionData(solution?.code || null)
+      setThoughtsData(solution?.thoughts || null)
+      setTimeComplexityData(solution?.time_complexity || null)
+      setSpaceComplexityData(solution?.space_complexity || null)
+    } else {
+      setSolutionData(solution || null)
+      setThoughtsData(null)
+      setTimeComplexityData(null)
+      setSpaceComplexityData(null)
+    }
 
     const unsubscribe = queryClient.getQueryCache().subscribe((event) => {
       if (event?.query.queryKey[0] === "problem_statement") {
@@ -408,21 +449,25 @@ const Solutions: React.FC<SolutionsProps> = ({
         )
       }
       if (event?.query.queryKey[0] === "solution") {
-        const solution = queryClient.getQueryData(["solution"]) as {
-          code: string
-          thoughts: string[]
-          time_complexity: string
-          space_complexity: string
-        } | null
+        const solution = queryClient.getQueryData(["solution"]) as any
 
-        setSolutionData(solution?.code ?? null)
-        setThoughtsData(solution?.thoughts ?? null)
-        setTimeComplexityData(solution?.time_complexity ?? null)
-        setSpaceComplexityData(solution?.space_complexity ?? null)
+        if (appMode === "coding") {
+          // Coding mode: extract code and complexity data
+          setSolutionData(solution?.code ?? null)
+          setThoughtsData(solution?.thoughts ?? null)
+          setTimeComplexityData(solution?.time_complexity ?? null)
+          setSpaceComplexityData(solution?.space_complexity ?? null)
+        } else {
+          // Non-coding mode: store the whole answer object
+          setSolutionData(solution ?? null)
+          setThoughtsData(null)
+          setTimeComplexityData(null)
+          setSpaceComplexityData(null)
+        }
       }
     })
     return () => unsubscribe()
-  }, [queryClient])
+  }, [queryClient, appMode])
 
   const handleTooltipVisibilityChange = (visible: boolean, height: number) => {
     setIsTooltipVisible(visible)
@@ -503,6 +548,7 @@ const Solutions: React.FC<SolutionsProps> = ({
               credits={credits}
               currentLanguage={currentLanguage}
               setLanguage={setLanguage}
+              appMode={appMode}
             />
 
             {/* Main Content - Modified width constraints */}
@@ -528,58 +574,79 @@ const Solutions: React.FC<SolutionsProps> = ({
 
                   {solutionData && (
                     <>
-                      <ContentSection
-                        title={`My Thoughts`}
-                        content={
-                          thoughtsData && (
-                            <div className="space-y-3">
-                              <div className="space-y-1">
-                                {thoughtsData.map((thought, index) => {
-                                  // Check if the thought contains markdown-like content
-                                  const hasMarkdown = thought.includes('```') ||
-                                    thought.includes('**') ||
-                                    thought.includes('*') ||
-                                    thought.includes('`') ||
-                                    thought.includes('#') ||
-                                    thought.includes('[') ||
-                                    thought.includes('- ') ||
-                                    thought.includes('1. ');
+                      {appMode === "coding" ? (
+                        <>
+                          <ContentSection
+                            title={`My Thoughts`}
+                            content={
+                              thoughtsData && (
+                                <div className="space-y-3">
+                                  <div className="space-y-1">
+                                    {thoughtsData.map((thought, index) => {
+                                      // Check if the thought contains markdown-like content
+                                      const hasMarkdown = thought.includes('```') ||
+                                        thought.includes('**') ||
+                                        thought.includes('*') ||
+                                        thought.includes('`') ||
+                                        thought.includes('#') ||
+                                        thought.includes('[') ||
+                                        thought.includes('- ') ||
+                                        thought.includes('1. ');
 
-                                  return (
-                                    <div key={index}>
-                                      {hasMarkdown ? (
-                                        <MarkdownRenderer
-                                          content={thought}
-                                          className="text-[13px] leading-[1.4] text-gray-100"
-                                        />
-                                      ) : (
-                                        <div className="flex items-start gap-2">
-                                          <div className="w-1 h-1 rounded-full bg-blue-400/80 mt-2 shrink-0" />
-                                          <div>{thought}</div>
+                                      return (
+                                        <div key={index}>
+                                          {hasMarkdown ? (
+                                            <MarkdownRenderer
+                                              content={thought}
+                                              className="text-[13px] leading-[1.4] text-gray-100"
+                                            />
+                                          ) : (
+                                            <div className="flex items-start gap-2">
+                                              <div className="w-1 h-1 rounded-full bg-blue-400/80 mt-2 shrink-0" />
+                                              <div>{thought}</div>
+                                            </div>
+                                          )}
                                         </div>
-                                      )}
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          )
-                        }
-                        isLoading={!thoughtsData}
-                      />
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              )
+                            }
+                            isLoading={!thoughtsData}
+                          />
 
-                      <SolutionSection
-                        title="Solution"
-                        content={solutionData}
-                        isLoading={!solutionData}
-                        currentLanguage={currentLanguage}
-                      />
+                          <SolutionSection
+                            title="Solution"
+                            content={solutionData}
+                            isLoading={!solutionData}
+                            currentLanguage={currentLanguage}
+                          />
+                        </>
+                      ) : (
+                        // Non-coding mode: show answer instead of code
+                        <ContentSection
+                          title="Answer"
+                          content={
+                            solutionData && typeof solutionData === 'object' && solutionData.answer && (
+                              <MarkdownRenderer
+                                content={solutionData.answer}
+                                className="text-[13px] leading-[1.4] text-gray-100"
+                              />
+                            )
+                          }
+                          isLoading={!solutionData}
+                        />
+                      )}
 
-                      <ComplexitySection
-                        timeComplexity={timeComplexityData}
-                        spaceComplexity={spaceComplexityData}
-                        isLoading={!timeComplexityData || !spaceComplexityData}
-                      />
+                      {/* Only show complexity section in coding mode */}
+                      {appMode === "coding" && (
+                        <ComplexitySection
+                          timeComplexity={timeComplexityData}
+                          spaceComplexity={spaceComplexityData}
+                          isLoading={!timeComplexityData || !spaceComplexityData}
+                        />
+                      )}
                     </>
                   )}
                 </div>

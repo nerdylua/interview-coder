@@ -5,6 +5,7 @@ import { supabase } from "../../lib/supabase"
 import { LanguageSelector } from "../shared/LanguageSelector"
 import { COMMAND_KEY } from "../../utils/platform"
 import ScreenshotModeIndicator from "../ScreenshotModeIndicator"
+import ModeIndicator from "../ModeIndicator"
 
 export interface SolutionCommandsProps {
   onTooltipVisibilityChange: (visible: boolean, height: number) => void
@@ -14,6 +15,7 @@ export interface SolutionCommandsProps {
   credits: number
   currentLanguage: string
   setLanguage: (language: string) => void
+  appMode: "coding" | "non-coding"
 }
 
 const handleSignOut = async () => {
@@ -36,7 +38,8 @@ const SolutionCommands: React.FC<SolutionCommandsProps> = ({
   extraScreenshots = [],
   credits,
   currentLanguage,
-  setLanguage
+  setLanguage,
+  appMode
 }) => {
   const [isTooltipVisible, setIsTooltipVisible] = useState(false)
   const tooltipRef = useRef<HTMLDivElement>(null)
@@ -91,8 +94,8 @@ const SolutionCommands: React.FC<SolutionCommandsProps> = ({
             </div>
           </div>
 
-          {/* Screenshot and Debug commands - Only show if not processing */}
-          {!isProcessing && (
+          {/* Screenshot and Debug commands - Only show if not processing and in coding mode */}
+          {!isProcessing && appMode === "coding" && (
             <>
               <div
                 className="flex items-center gap-2 cursor-pointer rounded px-2 py-1.5 hover:bg-white/10 transition-colors"
@@ -195,6 +198,9 @@ const SolutionCommands: React.FC<SolutionCommandsProps> = ({
 
           {/* Screenshot Mode Indicator */}
           <ScreenshotModeIndicator />
+
+          {/* Mode Indicator */}
+          <ModeIndicator appMode={appMode} />
 
           {/* Separator */}
           <div className="mx-2 h-4 w-px bg-white/20" />

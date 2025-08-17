@@ -240,13 +240,25 @@ const electronAPI = {
   
   // Screenshot mode methods
   getScreenshotMode: () => ipcRenderer.invoke("get-screenshot-mode"),
-  setScreenshotMode: (mode: "full" | "left" | "right") => 
+  setScreenshotMode: (mode: "full" | "left" | "right") =>
     ipcRenderer.invoke("set-screenshot-mode", mode),
   onScreenshotModeChanged: (callback: (mode: string) => void) => {
     const subscription = (_event: any, mode: string) => callback(mode)
     ipcRenderer.on("screenshot-mode-changed", subscription)
     return () => {
       ipcRenderer.removeListener("screenshot-mode-changed", subscription)
+    }
+  },
+
+  // App mode methods
+  getAppMode: () => ipcRenderer.invoke("get-app-mode"),
+  setAppMode: (mode: "coding" | "non-coding") =>
+    ipcRenderer.invoke("set-app-mode", mode),
+  onAppModeChanged: (callback: (mode: "coding" | "non-coding") => void) => {
+    const subscription = (_event: any, mode: "coding" | "non-coding") => callback(mode)
+    ipcRenderer.on("app-mode-changed", subscription)
+    return () => {
+      ipcRenderer.removeListener("app-mode-changed", subscription)
     }
   }
 }

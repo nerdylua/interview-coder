@@ -237,7 +237,8 @@ export class ProcessingHelper {
     }
 
     const view = this.deps.getView()
-    console.log("Processing screenshots in view:", view)
+    const appMode = this.deps.getAppMode()
+    console.log("Processing screenshots in view:", view, "mode:", appMode)
 
     if (view === "queue") {
       mainWindow.webContents.send(this.deps.PROCESSING_EVENTS.INITIAL_START)
@@ -286,7 +287,9 @@ export class ProcessingHelper {
           throw new Error("Failed to load screenshot data");
         }
 
-        const result = await this.processScreenshotsHelper(validScreenshots, signal)
+        const result = appMode === "coding"
+          ? await this.processScreenshotsHelper(validScreenshots, signal)
+          : await this.processNonCodingScreenshots(validScreenshots, signal)
 
         if (!result.success) {
           console.log("Processing failed:", result.error)
@@ -338,15 +341,23 @@ export class ProcessingHelper {
       }
     } else {
       // view == 'solutions'
+
+      // For non-coding mode, don't allow debug mode
+      if (appMode === "non-coding") {
+        console.log("Debug mode not available in non-coding mode");
+        mainWindow.webContents.send(this.deps.PROCESSING_EVENTS.NO_SCREENSHOTS);
+        return;
+      }
+
       const extraScreenshotQueue =
         this.screenshotHelper.getExtraScreenshotQueue()
       console.log("Processing extra queue screenshots:", extraScreenshotQueue)
-      
+
       // Check if the extra queue is empty
       if (!extraScreenshotQueue || extraScreenshotQueue.length === 0) {
         console.log("No extra screenshots found in queue");
         mainWindow.webContents.send(this.deps.PROCESSING_EVENTS.NO_SCREENSHOTS);
-        
+
         return;
       }
 
@@ -1488,6 +1499,542 @@ function solution() {
     } catch (error: any) {
       console.error("Debug processing error:", error);
       return { success: false, error: error.message || "Failed to process debug request" };
+    }
+  }
+
+  private async processNonCodingScreenshots(
+    screenshots: Array<{ path: string; data: string }>,
+    signal: AbortSignal
+  ) {
+    try {
+      const config = configHelper.loadConfig();
+      const mainWindow = this.deps.getMainWindow();
+
+      // Step 1: Analyze the question from screenshots
+      const imageDataList = screenshots.map(screenshot => screenshot.data);
+
+      // Update the user on progress
+      if (mainWindow) {
+        mainWindow.webContents.send("processing-status", {
+          message: "Analyzing question from screenshots...",
+          progress: 20
+        });
+      }
+
+      let questionAnalysis;
+
+      if (config.apiProvider === "openai") {
+        if (!this.openaiClient) {
+          return {
+            success: false,
+            error: "OpenAI API key not configured. Please check your settings."
+          };
+        }
+
+        // Use OpenAI for processing
+        const messages = [
+          {
+            role: "system" as const,
+            content: "You are an expert assistant for online assessments. Carefully analyze the screenshot(s) to extract all questions (there may be 1-3 questions). Focus on capturing the EXACT questions as written, including all details, options, and requirements. If multiple questions exist, include all in the question_text field with clear numbering. Return the information in JSON format with these fields: question_text, question_type (mcq/fill_blank/behavioral/other), options (if applicable), context. Just return the structured JSON without any other text."
+          },
+          {
+            role: "user" as const,
+            content: [
+              {
+                type: "text" as const,
+                text: `Analyze this assessment question screenshot and extract all relevant information. The screenshot may contain 1-3 questions.
+
+Return in JSON format with:
+- question_text: The complete question text (if multiple questions, include all with clear numbering like "Q1: ... Q2: ... Q3: ...")
+- question_type: Type of question (mcq, fill_blank, behavioral, other) - use the most common type if mixed
+- options: Array of options if it's MCQ, null otherwise (for multiple MCQs, include all options)
+- context: Any additional context or instructions`
+              },
+              ...imageDataList.map(data => ({
+                type: "image_url" as const,
+                image_url: { url: `data:image/png;base64,${data}` }
+              }))
+            ]
+          }
+        ];
+
+        // Send to OpenAI Vision API
+        const extractionResponse = await this.openaiClient.chat.completions.create({
+          model: config.extractionModel || "gpt-4.1",
+          messages: messages,
+          max_tokens: 4000,
+          temperature: 0.2
+        });
+
+        // Validate response structure
+        if (!extractionResponse.choices || extractionResponse.choices.length === 0) {
+          throw new Error("No response choices returned from OpenAI API");
+        }
+
+        const extractionContent = extractionResponse.choices[0].message.content;
+        if (!extractionContent) {
+          throw new Error("Empty response content from OpenAI API");
+        }
+
+        try {
+          // Clean the response content by removing markdown code blocks if present
+          let cleanedContent = extractionContent.trim();
+          if (cleanedContent.startsWith('```json')) {
+            cleanedContent = cleanedContent.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+          } else if (cleanedContent.startsWith('```')) {
+            cleanedContent = cleanedContent.replace(/^```\s*/, '').replace(/\s*```$/, '');
+          }
+
+          questionAnalysis = JSON.parse(cleanedContent);
+        } catch (parseError) {
+          console.error("Failed to parse OpenAI response:", extractionContent);
+          throw new Error("Failed to parse question analysis from OpenAI");
+        }
+      } else if (config.apiProvider === "gemini") {
+        if (!this.geminiApiKey) {
+          return {
+            success: false,
+            error: "Gemini API key not configured. Please check your settings."
+          };
+        }
+
+        try {
+          const geminiMessages = [
+            {
+              role: "user",
+              parts: [
+                {
+                  text: `You are an expert assistant for online assessments. Carefully analyze the screenshot(s) to extract the complete question. Focus on capturing the EXACT question as written, including all details, options, and requirements.
+
+Return the information in JSON format with these fields: question_text, question_type (mcq/fill_blank/behavioral/other), options (if applicable), context. Just return the structured JSON without any other text.`
+                },
+                ...imageDataList.map(data => ({
+                  inlineData: {
+                    mimeType: "image/png",
+                    data: data
+                  }
+                }))
+              ]
+            }
+          ];
+
+          // Make API request to Gemini
+          const response = await axios.default.post(
+            `https://generativelanguage.googleapis.com/v1beta/models/${config.extractionModel || "gemini-2.5-flash"}:generateContent?key=${this.geminiApiKey}`,
+            {
+              contents: geminiMessages,
+              generationConfig: {
+                temperature: 0.2,
+                maxOutputTokens: 8000
+              }
+            },
+            { signal }
+          );
+
+          const responseData = response.data;
+          if (!responseData.candidates || responseData.candidates.length === 0) {
+            throw new Error("No response from Gemini API");
+          }
+
+          const extractionContent = responseData.candidates[0].content.parts[0].text;
+          try {
+            // Clean the response content by removing markdown code blocks if present
+            let cleanedContent = extractionContent.trim();
+            if (cleanedContent.startsWith('```json')) {
+              cleanedContent = cleanedContent.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+            } else if (cleanedContent.startsWith('```')) {
+              cleanedContent = cleanedContent.replace(/^```\s*/, '').replace(/\s*```$/, '');
+            }
+
+            questionAnalysis = JSON.parse(cleanedContent);
+          } catch (parseError) {
+            console.error("Failed to parse Gemini response:", extractionContent);
+            throw new Error("Failed to parse question analysis from Gemini");
+          }
+        } catch (error) {
+          console.error("Error using Gemini API for question analysis:", error);
+          return {
+            success: false,
+            error: "Failed to process with Gemini API. Please check your API key or try again later."
+          };
+        }
+      } else if (config.apiProvider === "anthropic") {
+        if (!this.anthropicClient) {
+          return {
+            success: false,
+            error: "Anthropic API key not configured. Please check your settings."
+          };
+        }
+
+        try {
+          const messages = [
+            {
+              role: "user" as const,
+              content: [
+                {
+                  type: "text" as const,
+                  text: `You are an expert assistant for online assessments. Carefully analyze the screenshot(s) to extract the complete question. Focus on capturing the EXACT question as written, including all details, options, and requirements.
+
+Return the information in JSON format with these fields: question_text, question_type (mcq/fill_blank/behavioral/other), options (if applicable), context. Just return the structured JSON without any other text.`
+                },
+                ...imageDataList.map(data => ({
+                  type: "image" as const,
+                  source: {
+                    type: "base64" as const,
+                    media_type: "image/png" as const,
+                    data: data
+                  }
+                }))
+              ]
+            }
+          ];
+
+          const response = await this.anthropicClient.messages.create({
+            model: config.extractionModel || "claude-3-7-sonnet-20250219",
+            max_tokens: 4000,
+            messages: messages,
+            temperature: 0.2
+          });
+
+          // Validate response structure
+          if (!response.content || response.content.length === 0) {
+            throw new Error("No response content from Anthropic API");
+          }
+
+          const contentBlock = response.content[0] as { type: 'text', text: string };
+          if (!contentBlock || contentBlock.type !== 'text' || !contentBlock.text) {
+            throw new Error("Invalid response structure from Anthropic API");
+          }
+
+          const extractionContent = contentBlock.text;
+          try {
+            // Clean the response content by removing markdown code blocks if present
+            let cleanedContent = extractionContent.trim();
+            if (cleanedContent.startsWith('```json')) {
+              cleanedContent = cleanedContent.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+            } else if (cleanedContent.startsWith('```')) {
+              cleanedContent = cleanedContent.replace(/^```\s*/, '').replace(/\s*```$/, '');
+            }
+
+            questionAnalysis = JSON.parse(cleanedContent);
+          } catch (parseError) {
+            console.error("Failed to parse Anthropic response:", extractionContent);
+            throw new Error("Failed to parse question analysis from Anthropic");
+          }
+        } catch (error: any) {
+          console.error("Error using Anthropic API for question analysis:", error);
+          return {
+            success: false,
+            error: "Failed to process with Anthropic API. Please check your API key or try again later."
+          };
+        }
+      }
+
+      // Update the user on progress
+      if (mainWindow) {
+        mainWindow.webContents.send("processing-status", {
+          message: "Question analyzed successfully. Generating answer...",
+          progress: 40
+        });
+      }
+
+      // Store question info in AppState
+      this.deps.setProblemInfo(questionAnalysis);
+
+      // Send first success event
+      if (mainWindow) {
+        mainWindow.webContents.send(
+          this.deps.PROCESSING_EVENTS.PROBLEM_EXTRACTED,
+          questionAnalysis
+        );
+
+        // Generate answer after successful extraction
+        const answerResult = await this.generateNonCodingAnswer(signal);
+        if (answerResult.success) {
+          // Final progress update
+          mainWindow.webContents.send("processing-status", {
+            message: "Answer generated successfully",
+            progress: 100
+          });
+
+          mainWindow.webContents.send(
+            this.deps.PROCESSING_EVENTS.SOLUTION_SUCCESS,
+            answerResult.data
+          );
+          return { success: true, data: answerResult.data };
+        } else {
+          throw new Error(
+            answerResult.error || "Failed to generate answer"
+          );
+        }
+      }
+
+      return { success: false, error: "No main window available" };
+    } catch (error: any) {
+      console.error("Non-coding processing error:", error);
+      return { success: false, error: error.message || "Failed to process non-coding question" };
+    }
+  }
+
+  private async generateNonCodingAnswer(signal: AbortSignal) {
+    try {
+      const questionInfo = this.deps.getProblemInfo();
+      const config = configHelper.loadConfig();
+      const mainWindow = this.deps.getMainWindow();
+
+      if (!questionInfo) {
+        throw new Error("No question info available");
+      }
+
+      // Update progress status
+      if (mainWindow) {
+        mainWindow.webContents.send("processing-status", {
+          message: "Analyzing question and generating answer...",
+          progress: 60
+        });
+      }
+
+      // Create prompt for answer generation based on question type
+      let promptText = "";
+
+      if (questionInfo.question_type === "mcq") {
+        promptText = `
+Analyze the multiple choice question(s) from the screenshot and provide concise answers:
+
+Question(s): ${questionInfo.question_text}
+
+${questionInfo.options ? `Options:
+${questionInfo.options.map((opt: string, idx: number) => `${String.fromCharCode(65 + idx)}. ${opt}`).join('\n')}` : ''}
+
+${questionInfo.context ? `Context: ${questionInfo.context}` : ''}
+
+For each question, provide:
+- **Answer:** [Letter] - [Option text]
+- **Reason:** [Brief 1-2 sentence explanation]
+
+If there are multiple questions, number them clearly (Q1, Q2, Q3). Keep explanations concise and focused.
+`;
+      } else if (questionInfo.question_type === "fill_blank") {
+        promptText = `
+Analyze the fill-in-the-blank question(s) from the screenshot and provide concise answers:
+
+Question(s): ${questionInfo.question_text}
+
+${questionInfo.context ? `Context: ${questionInfo.context}` : ''}
+
+For each question, provide:
+- **Answer:** [Word/phrase to fill the blank]
+- **Reason:** [Brief 1-2 sentence explanation]
+
+If there are multiple questions, number them clearly (Q1, Q2, Q3). Keep explanations concise and focused.
+`;
+      } else if (questionInfo.question_type === "behavioral") {
+        promptText = `
+Analyze this behavioral/situational question and provide a structured response:
+
+Question: ${questionInfo.question_text}
+
+${questionInfo.context ? `Context: ${questionInfo.context}` : ''}
+
+Structure your response as follows:
+
+1. **Tips** or **How to answer this:** section with 3-4 concise bullet points on how to approach this question effectively
+
+2. **Sample Answer:** A natural, conversational first-person response as if you're speaking directly to an interviewer. Use the STAR method (Situation, Task, Action, Result) structure but write it in a flowing, first-person narrative without explicit subheadings. The response should:
+   - Be written in first person ("I", "my", "we")
+   - Sound natural and conversational, like you're telling a story
+   - Be sufficiently detailed but not overly long (aim for 2-3 paragraphs)
+   - Flow naturally from situation to task to action to result
+   - Show specific examples and quantifiable results where possible
+   - Demonstrate relevant skills and qualities
+
+Format with clear headings and write the sample answer as if you're actually answering the question in an interview setting.
+`;
+      } else {
+        promptText = `
+Analyze the assessment question(s) from the screenshot and provide comprehensive answers:
+
+Question(s): ${questionInfo.question_text}
+
+${questionInfo.context ? `Context: ${questionInfo.context}` : ''}
+
+For each question, provide:
+- **Answer:** [Clear, direct response]
+- **Explanation:** [Supporting reasoning and relevant details]
+
+If there are multiple questions, number them clearly (Q1, Q2, Q3). Be thorough but organized in your responses.
+`;
+      }
+
+      let responseContent;
+
+      if (config.apiProvider === "openai") {
+        // OpenAI processing
+        if (!this.openaiClient) {
+          return {
+            success: false,
+            error: "OpenAI API key not configured. Please check your settings."
+          };
+        }
+
+        // Send to OpenAI API
+        const systemPrompt = questionInfo.question_type === "behavioral"
+          ? "You are an expert interview coach. For behavioral questions, provide a structured response with: 1) A 'Tips' or 'How to answer this:' section with 3-4 concise bullet points, followed by 2) A 'Sample Answer:' section with a natural, first-person response using STAR method naturally. Be conversational, specific, and authentic."
+          : questionInfo.question_type === "mcq" || questionInfo.question_type === "fill_blank"
+          ? "You are an expert assessment assistant. For MCQs and fill-in-the-blank questions, provide concise answers with brief explanations. Handle multiple questions clearly and keep responses focused and direct."
+          : "You are an expert assessment assistant. Provide clear, comprehensive answers with organized explanations. Structure your responses clearly for easy understanding.";
+
+        const answerResponse = await this.openaiClient.chat.completions.create({
+          model: config.solutionModel || "gpt-4.1",
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: promptText }
+          ],
+          max_tokens: 4000,
+          temperature: 0.2
+        });
+
+        // Validate response structure
+        if (!answerResponse.choices || answerResponse.choices.length === 0) {
+          throw new Error("No response choices returned from OpenAI API");
+        }
+
+        responseContent = answerResponse.choices[0].message.content;
+
+        if (!responseContent) {
+          throw new Error("Empty response content from OpenAI API");
+        }
+      } else if (config.apiProvider === "gemini") {
+        if (!this.geminiApiKey) {
+          return {
+            success: false,
+            error: "Gemini API key not configured. Please check your settings."
+          };
+        }
+
+        try {
+          // Create Gemini message structure
+          const systemPrompt = questionInfo.question_type === "behavioral"
+            ? "You are an expert interview coach. For behavioral questions, provide a structured response with: 1) A 'Tips' or 'How to answer this:' section with 3-4 concise bullet points, followed by 2) A 'Sample Answer:' section with a natural, first-person response using STAR method naturally. Be conversational, specific, and authentic."
+            : questionInfo.question_type === "mcq" || questionInfo.question_type === "fill_blank"
+            ? "You are an expert assessment assistant. For MCQs and fill-in-the-blank questions, provide concise answers with brief explanations. Handle multiple questions clearly and keep responses focused and direct."
+            : "You are an expert assessment assistant. Provide clear, comprehensive answers with organized explanations. Structure your responses clearly for easy understanding.";
+
+          const geminiMessages = [
+            {
+              role: "user",
+              parts: [
+                {
+                  text: `${systemPrompt}\n\n${promptText}`
+                }
+              ]
+            }
+          ];
+
+          // Make API request to Gemini
+          const response = await axios.default.post(
+            `https://generativelanguage.googleapis.com/v1beta/models/${config.solutionModel || "gemini-2.5-flash"}:generateContent?key=${this.geminiApiKey}`,
+            {
+              contents: geminiMessages,
+              generationConfig: {
+                temperature: 0.2,
+                maxOutputTokens: 8000
+              }
+            },
+            { signal }
+          );
+
+          const responseData = response.data;
+          if (!responseData.candidates || responseData.candidates.length === 0) {
+            throw new Error("No response from Gemini API");
+          }
+
+          const candidate = responseData.candidates[0];
+          if (!candidate.content || !candidate.content.parts || candidate.content.parts.length === 0) {
+            throw new Error("Invalid response structure from Gemini API");
+          }
+
+          responseContent = candidate.content.parts[0].text;
+
+          if (!responseContent) {
+            throw new Error("Empty response content from Gemini API");
+          }
+        } catch (error) {
+          console.error("Error using Gemini API for answer generation:", error);
+          return {
+            success: false,
+            error: "Failed to generate answer with Gemini API. Please check your API key or try again later."
+          };
+        }
+      } else if (config.apiProvider === "anthropic") {
+        if (!this.anthropicClient) {
+          return {
+            success: false,
+            error: "Anthropic API key not configured. Please check your settings."
+          };
+        }
+
+        try {
+          const systemPrompt = questionInfo.question_type === "behavioral"
+            ? "You are an expert interview coach. For behavioral questions, provide a structured response with: 1) A 'Tips' or 'How to answer this:' section with 3-4 concise bullet points, followed by 2) A 'Sample Answer:' section with a natural, first-person response using STAR method naturally. Be conversational, specific, and authentic."
+            : questionInfo.question_type === "mcq" || questionInfo.question_type === "fill_blank"
+            ? "You are an expert assessment assistant. For MCQs and fill-in-the-blank questions, provide concise answers with brief explanations. Handle multiple questions clearly and keep responses focused and direct."
+            : "You are an expert assessment assistant. Provide clear, comprehensive answers with organized explanations. Structure your responses clearly for easy understanding.";
+
+          const messages = [
+            {
+              role: "user" as const,
+              content: [
+                {
+                  type: "text" as const,
+                  text: `${systemPrompt}\n\n${promptText}`
+                }
+              ]
+            }
+          ];
+
+          // Send to Anthropic API
+          const response = await this.anthropicClient.messages.create({
+            model: config.solutionModel || "claude-3-7-sonnet-20250219",
+            max_tokens: 4000,
+            messages: messages,
+            temperature: 0.2
+          });
+
+          // Validate response structure
+          if (!response.content || response.content.length === 0) {
+            throw new Error("No response content from Anthropic API");
+          }
+
+          const contentBlock = response.content[0] as { type: 'text', text: string };
+          if (!contentBlock || contentBlock.type !== 'text' || !contentBlock.text) {
+            throw new Error("Invalid response structure from Anthropic API");
+          }
+
+          responseContent = contentBlock.text;
+        } catch (error: any) {
+          console.error("Error using Anthropic API for answer generation:", error);
+          return {
+            success: false,
+            error: "Failed to generate answer with Anthropic API. Please check your API key or try again later."
+          };
+        }
+      }
+
+      if (!responseContent) {
+        throw new Error("No response content generated");
+      }
+
+      const formattedResponse = {
+        answer: responseContent,
+        question_type: questionInfo.question_type,
+        question_text: questionInfo.question_text
+      };
+
+      return { success: true, data: formattedResponse };
+    } catch (error: any) {
+      console.error("Answer generation error:", error);
+      return { success: false, error: error.message || "Failed to generate answer" };
     }
   }
 

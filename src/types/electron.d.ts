@@ -66,6 +66,11 @@ export interface ElectronAPI {
   getScreenshotMode: () => Promise<string>
   setScreenshotMode: (mode: "full" | "left" | "right") => Promise<{ success: boolean }>
   onScreenshotModeChanged: (callback: (mode: string) => void) => () => void
+
+  // App mode methods
+  getAppMode: () => Promise<"coding" | "non-coding">
+  setAppMode: (mode: "coding" | "non-coding") => Promise<{ success: boolean }>
+  onAppModeChanged: (callback: (mode: "coding" | "non-coding") => void) => () => void
 }
 
 declare global {

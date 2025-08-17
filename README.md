@@ -35,7 +35,7 @@ Note: The application is **NOT** invisible to:
 
 - Node.js (v16 or higher)
 - npm or bun package manager
-- OpenAI API Key
+- OpenAI/Gemini/Anthropic API Key
 - Screen Recording Permission for Terminal/IDE
   - On macOS:
     1. Go to System Preferences > Security & Privacy > Privacy > Screen Recording
@@ -107,10 +107,6 @@ npm run package-win
 yarn package-win
 ```
 
-The packaged applications will be available in the `release` directory.
+The packaged applications will be available in the `release/win-unpacked` directory.
 
-**What the scripts do:**
-- Create necessary directories for the application
-- Clean previous builds to ensure a fresh start
-- Build the application in production mode
-- Launch the application in invisible mode
+Future enhancement: Add listen to interview and respond feature 

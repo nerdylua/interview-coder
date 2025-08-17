@@ -35,6 +35,9 @@ const state = {
   problemInfo: null as any,
   hasDebugged: false,
 
+  // Application mode management
+  appMode: "coding" as "coding" | "non-coding",
+
   // Processing events
   PROCESSING_EVENTS: {
     UNAUTHORIZED: "processing-unauthorized",
@@ -69,6 +72,8 @@ export interface IProcessingHelperDeps {
   ) => Promise<{ success: boolean; error?: string }>
   setHasDebugged: (value: boolean) => void
   getHasDebugged: () => boolean
+  getAppMode: () => "coding" | "non-coding"
+  setAppMode: (mode: "coding" | "non-coding") => void
   PROCESSING_EVENTS: typeof state.PROCESSING_EVENTS
 }
 
@@ -87,6 +92,8 @@ export interface IShortcutsHelperDeps {
   moveWindowDown: () => void
   getScreenshotMode: () => string
   setScreenshotMode: (mode: "full" | "left" | "right") => void
+  getAppMode: () => "coding" | "non-coding"
+  setAppMode: (mode: "coding" | "non-coding") => void
 }
 
 export interface IIpcHandlerDeps {
@@ -111,6 +118,8 @@ export interface IIpcHandlerDeps {
   moveWindowDown: () => void
   getScreenshotMode: () => string
   setScreenshotMode: (mode: "full" | "left" | "right") => void
+  getAppMode: () => "coding" | "non-coding"
+  setAppMode: (mode: "coding" | "non-coding") => void
 }
 
 // Initialize helpers
@@ -131,6 +140,8 @@ function initializeHelpers() {
     deleteScreenshot,
     setHasDebugged,
     getHasDebugged,
+    getAppMode,
+    setAppMode,
     PROCESSING_EVENTS: state.PROCESSING_EVENTS
   } as IProcessingHelperDeps)
   state.shortcutsHelper = new ShortcutsHelper({
@@ -156,7 +167,9 @@ function initializeHelpers() {
     moveWindowUp: () => moveWindowVertical((y) => y - state.step),
     moveWindowDown: () => moveWindowVertical((y) => y + state.step),
     getScreenshotMode,
-    setScreenshotMode
+    setScreenshotMode,
+    getAppMode,
+    setAppMode
   } as IShortcutsHelperDeps)
 }
 
@@ -565,7 +578,9 @@ async function initializeApp() {
       moveWindowUp: () => moveWindowVertical((y) => y - state.step),
       moveWindowDown: () => moveWindowVertical((y) => y + state.step),
       getScreenshotMode,
-      setScreenshotMode
+      setScreenshotMode,
+      getAppMode,
+      setAppMode
     })
     await createWindow()
     state.shortcutsHelper?.registerGlobalShortcuts()
@@ -701,6 +716,21 @@ function getHasDebugged(): boolean {
   return state.hasDebugged
 }
 
+function getAppMode(): "coding" | "non-coding" {
+  return state.appMode
+}
+
+function setAppMode(mode: "coding" | "non-coding"): void {
+  state.appMode = mode
+  console.log("App mode changed to:", mode)
+
+  // Notify the renderer process about mode change
+  const mainWindow = getMainWindow()
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("app-mode-changed", mode)
+  }
+}
+
 // Export state and functions for other modules
 export {
   state,
@@ -726,7 +756,9 @@ export {
   getScreenshotMode,
   setScreenshotMode,
   setHasDebugged,
-  getHasDebugged
+  getHasDebugged,
+  getAppMode,
+  setAppMode
 }
 
 app.whenReady().then(initializeApp)

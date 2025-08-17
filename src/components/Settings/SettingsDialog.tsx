@@ -469,10 +469,13 @@ export function SettingsDialog({ open: externalOpen, onOpenChange }: SettingsDia
                 
                 <div className="text-white/70">Process Screenshots</div>
                 <div className="text-white/90 font-mono">Ctrl+Enter / Cmd+Enter</div>
-                
+
+                <div className="text-white/70">Switch Mode</div>
+                <div className="text-white/90 font-mono">Ctrl+N / Cmd+N</div>
+
                 <div className="text-white/70">Delete Last Screenshot</div>
                 <div className="text-white/90 font-mono">Ctrl+L / Cmd+L</div>
-                
+
                 <div className="text-white/70">Reset View</div>
                 <div className="text-white/90 font-mono">Ctrl+R / Cmd+R</div>
                 

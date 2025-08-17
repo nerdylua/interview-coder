@@ -18,6 +18,7 @@ const SubscribedApp: React.FC<SubscribedAppProps> = ({
 }) => {
   const queryClient = useQueryClient()
   const [view, setView] = useState<"queue" | "solutions" | "debug">("queue")
+  const [appMode, setAppMode] = useState<"coding" | "non-coding">("coding")
   const containerRef = useRef<HTMLDivElement>(null)
   const { showToast } = useToast()
 
@@ -38,6 +39,34 @@ const SubscribedApp: React.FC<SubscribedAppProps> = ({
       })
       setView("queue")
     })
+
+    return () => {
+      cleanup()
+    }
+  }, [])
+
+  // Listen for app mode changes
+  useEffect(() => {
+    const cleanup = window.electronAPI.onAppModeChanged((mode: "coding" | "non-coding") => {
+      setAppMode(mode)
+      // Reset view when mode changes
+      setView("queue")
+      queryClient.invalidateQueries({
+        queryKey: ["screenshots"]
+      })
+      queryClient.invalidateQueries({
+        queryKey: ["problem_statement"]
+      })
+      queryClient.invalidateQueries({
+        queryKey: ["solution"]
+      })
+      queryClient.invalidateQueries({
+        queryKey: ["new_solution"]
+      })
+    })
+
+    // Get initial app mode
+    window.electronAPI.getAppMode().then(setAppMode)
 
     return () => {
       cleanup()
@@ -142,6 +171,7 @@ const SubscribedApp: React.FC<SubscribedAppProps> = ({
           credits={credits}
           currentLanguage={currentLanguage}
           setLanguage={setLanguage}
+          appMode={appMode}
         />
       ) : view === "solutions" ? (
         <Solutions
@@ -149,6 +179,7 @@ const SubscribedApp: React.FC<SubscribedAppProps> = ({
           credits={credits}
           currentLanguage={currentLanguage}
           setLanguage={setLanguage}
+          appMode={appMode}
         />
       ) : null}
     </div>

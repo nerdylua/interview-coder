@@ -38,7 +38,8 @@ export class ShortcutsHelper {
     globalShortcut.register("CommandOrControl+H", async () => {
       const mainWindow = this.deps.getMainWindow()
       if (mainWindow) {
-        console.log("Taking screenshot...")
+        const currentMode = this.deps.getAppMode()
+        console.log(`Taking screenshot in ${currentMode} mode...`)
         try {
           const screenshotPath = await this.deps.takeScreenshot()
           const preview = await this.deps.getImagePreview(screenshotPath)
@@ -53,12 +54,15 @@ export class ShortcutsHelper {
     })
 
     globalShortcut.register("CommandOrControl+Enter", async () => {
+      const currentMode = this.deps.getAppMode()
+      console.log(`Processing screenshots in ${currentMode} mode...`)
       await this.deps.processingHelper?.processScreenshots()
     })
 
     // Alternative shortcut for processing screenshots
     globalShortcut.register("CommandOrControl+T", async () => {
-      console.log("Command/Ctrl + T pressed. Processing screenshots...")
+      const currentMode = this.deps.getAppMode()
+      console.log(`Command/Ctrl + T pressed. Processing screenshots in ${currentMode} mode...`)
       await this.deps.processingHelper?.processScreenshots()
     })
 
@@ -111,6 +115,28 @@ export class ShortcutsHelper {
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send("reset-view")
         mainWindow.webContents.send("reset")
+      }
+    })
+
+    // Mode switching shortcut
+    globalShortcut.register("CommandOrControl+N", () => {
+      console.log("Command/Ctrl + N pressed. Switching to non-coding mode.")
+
+      const currentMode = this.deps.getAppMode()
+      const newMode = currentMode === "coding" ? "non-coding" : "coding"
+
+      this.deps.setAppMode(newMode)
+
+      // Reset the application state when switching modes
+      this.deps.processingHelper?.cancelOngoingRequests()
+      this.deps.clearQueues()
+      this.deps.setView("queue")
+
+      const mainWindow = this.deps.getMainWindow()
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("reset-view")
+        mainWindow.webContents.send("reset")
+        console.log(`Switched to ${newMode} mode`)
       }
     })
 

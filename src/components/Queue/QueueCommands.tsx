@@ -5,6 +5,7 @@ import { useToast } from "../../contexts/toast"
 import { LanguageSelector } from "../shared/LanguageSelector"
 import { COMMAND_KEY } from "../../utils/platform"
 import ScreenshotModeIndicator from "../ScreenshotModeIndicator"
+import ModeIndicator from "../ModeIndicator"
 
 interface QueueCommandsProps {
   onTooltipVisibilityChange: (visible: boolean, height: number) => void
@@ -12,6 +13,7 @@ interface QueueCommandsProps {
   credits: number
   currentLanguage: string
   setLanguage: (language: string) => void
+  appMode: "coding" | "non-coding"
 }
 
 const QueueCommands: React.FC<QueueCommandsProps> = ({
@@ -19,7 +21,8 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
   screenshotCount = 0,
   credits,
   currentLanguage,
-  setLanguage
+  setLanguage,
+  appMode
 }) => {
   const [isTooltipVisible, setIsTooltipVisible] = useState(false)
   const tooltipRef = useRef<HTMLDivElement>(null)
@@ -197,6 +200,9 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
 
           {/* Screenshot Mode Indicator */}
           <ScreenshotModeIndicator />
+
+          {/* Mode Indicator */}
+          <ModeIndicator appMode={appMode} />
 
           {/* Separator */}
           <div className="mx-2 h-4 w-px bg-white/20" />
