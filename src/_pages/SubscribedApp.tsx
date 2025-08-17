@@ -143,10 +143,8 @@ const SubscribedApp: React.FC<SubscribedAppProps> = ({
         queryClient.removeQueries({
           queryKey: ["problem_statement"]
         })
-        setView("queue")
-      }),
-      window.electronAPI.onResetView(() => {
         queryClient.setQueryData(["problem_statement"], null)
+        setView("queue")
       }),
       window.electronAPI.onProblemExtracted((data: any) => {
         if (view === "queue") {

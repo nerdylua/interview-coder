@@ -2089,7 +2089,12 @@ If there are multiple questions, number them clearly (Q1, Q2, Q3). Be thorough b
 
     const mainWindow = this.deps.getMainWindow()
     if (wasCancelled && mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send(this.deps.PROCESSING_EVENTS.NO_SCREENSHOTS)
+      // Small delay to ensure proper cleanup before sending events
+      setTimeout(() => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send(this.deps.PROCESSING_EVENTS.NO_SCREENSHOTS)
+        }
+      }, 50)
     }
   }
 }

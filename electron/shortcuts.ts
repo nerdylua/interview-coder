@@ -4,6 +4,8 @@ import { configHelper } from "./ConfigHelper"
 
 export class ShortcutsHelper {
   private deps: IShortcutsHelperDeps
+  private lastResetTime: number = 0
+  private resetDebounceMs: number = 1000 // 1 second debounce
 
   constructor(deps: IShortcutsHelperDeps) {
     this.deps = deps
@@ -95,27 +97,40 @@ export class ShortcutsHelper {
     })
 
     globalShortcut.register("CommandOrControl+R", () => {
+      const now = Date.now()
+
+      // Debounce reset operations to prevent rapid-fire resets
+      if (now - this.lastResetTime < this.resetDebounceMs) {
+        console.log("Reset debounced - too soon since last reset")
+        return
+      }
+
+      this.lastResetTime = now
+
       console.log(
         "Command + R pressed. Canceling requests and resetting queues..."
       )
 
-      // Cancel ongoing API requests
+      // Cancel ongoing API requests first
       this.deps.processingHelper?.cancelOngoingRequests()
 
-      // Clear both screenshot queues
-      this.deps.clearQueues()
+      // Small delay to ensure cancellation completes
+      setTimeout(() => {
+        // Clear both screenshot queues
+        this.deps.clearQueues()
 
-      console.log("Cleared queues.")
+        console.log("Cleared queues.")
 
-      // Update the view state to 'queue'
-      this.deps.setView("queue")
+        // Update the view state to 'queue'
+        this.deps.setView("queue")
 
-      // Notify renderer process to switch view to 'queue'
-      const mainWindow = this.deps.getMainWindow()
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send("reset-view")
-        mainWindow.webContents.send("reset")
-      }
+        // Notify renderer process to switch view to 'queue'
+        const mainWindow = this.deps.getMainWindow()
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send("reset-view")
+          mainWindow.webContents.send("reset")
+        }
+      }, 100) // 100ms delay to ensure proper sequencing
     })
 
     // Mode switching shortcut
